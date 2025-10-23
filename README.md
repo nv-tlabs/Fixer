@@ -126,3 +126,14 @@ accelerate launch --mixed_precision=bf16 --main_process_port 29501 --multi_gpu -
 
 **Best practice:** We set the hyperparameters from our best practice explicitly in the command above. Specifically, we used a learning rate of ```2e-5```, timesteps of ```250```, on resolution of ```576×1024```, and a perceptual loss weight of ```0.3```, etc. We encourage users to start training with these defaults parameters first and adjust them to their dataset as needed.
 
+## Citation
+
+```bibtex
+@inproceedings{wu2025difix3d+,
+  title={DIFIX3D+: Improving 3D Reconstructions with Single-Step Diffusion Models},
+  author={Wu, Jay Zhangjie and Zhang, Yuxuan and Turki, Haithem and Ren, Xuanchi and Gao, Jun and Shou, Mike Zheng and Fidler, Sanja and Gojcic, Zan and Ling, Huan},
+  booktitle={Proceedings of the Computer Vision and Pattern Recognition Conference},
+  pages={26024--26035},
+  year={2025}
+}
+```
