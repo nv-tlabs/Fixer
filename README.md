@@ -5,7 +5,12 @@
 
 Fixer is a single-step image diffusion model trained to enhance and remove artifacts in rendered novel views caused by underconstrained regions of three-dimensional (3D) representation. 
 
-Fixer is based on Difix3d+. See **[Paper](https://arxiv.org/abs/2503.01774), [Code](https://github.com/nv-tlabs/Difix3D/tree/main)**
+Fixer is based on Difix3d+. See **[Paper](https://arxiv.org/abs/2503.01774) | [Code](https://github.com/nv-tlabs/Difix3D/tree/main) | [Project Page](https://research.nvidia.com/labs/toronto-ai/difix3d/)**
+
+> **Difix3D+: Improving 3D Reconstructions with Single-Step Diffusion Models**  
+> [Jay Zhangjie Wu*](https://zhangjiewu.github.io/), [Yuxuan Zhang*](https://scholar.google.com/citations?user=Jt5VvNgAAAAJ&hl=en), [Haithem Turki](https://haithemturki.com/), [Xuanchi Ren](https://xuanchiren.com/), [Jun Gao](https://www.cs.toronto.edu/~jungao/),  
+[Mike Zheng Shou](https://sites.google.com/view/showlab/home?authuser=0), [Sanja Fidler](https://www.cs.utoronto.ca/~fidler/), [Zan Gojcic†](https://zgojcic.github.io/), [Huan Ling†](https://www.cs.toronto.edu/~linghuan/) _(*/† equal contribution/advising)_  
+CVPR 2025 (Oral) 
 
 ## Setup
 
