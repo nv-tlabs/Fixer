@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: Copyright (c) <year> NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,41 +23,34 @@ import torch
 from einops import rearrange, repeat
 import time
 import torch.nn.functional as F
-import time
 
-import argparse
-import json
-import os
+import sys
 
-import time
-
-import torch
-from megatron.core import parallel_state
 
 from cosmos_predict2.models.utils import init_weights_on_device, load_state_dict
 from cosmos_predict2.tokenizers.tokenizer import ResidualBlock, CausalConv3d
 from cosmos_predict2.configs.base.config_text2image import (
     get_cosmos_predict2_text2image_pipeline,
 )
+
 from cosmos_predict2.conditioner import DataType
 from cosmos_predict2.pipelines.text2image import Text2ImagePipeline
 
+
 from imaginaire.lazy_config import LazyDict, instantiate
 
-
-config = get_cosmos_predict2_text2image_pipeline(model_size="0.6B", fast_tokenizer=False)
+config = get_cosmos_predict2_text2image_pipeline(model_size="0.6B", fast_tokenizer=True)
 
 ### MiniTrainDIT
-config.dit_path = '/work/models/base/cosmos_ablation_2B_0502_t2i_309_1024res_multidataset_v4_synthetic_ratio_1_3.pth'
-config.tokenizer["vae_pth"] = '/work/models/base/tokenizer.pth'
+config.dit_path = '/work/models/base/model_fast_tokenizer.pt'
+config.tokenizer["vae_pth"] = '/work/models/base/tokenizer_fast.pth'
 config.guardrail_config.enabled=False
 
-
-from model import make_1step_sched_base as make_1step_sched 
+from model import make_1step_sched_base as make_1step_sched  # , my_vae_encoder_fwd, my_vae_decoder_fwd
 
 
 def load_ckpt_from_state_dict(net_pix2pix, net_disc, optimizer, optimizer_disc, pretrained_path):
-    sd = torch.load(pretrained_path, map_location="cuda")
+    sd = torch.load(pretrained_path, map_location="cpu")
         
     net_pix2pix.unet.load_state_dict(sd["state_dict_unet"])
     net_pix2pix.vae.load_state_dict(sd["state_dict_vae"])
@@ -71,6 +64,7 @@ def load_ckpt_from_state_dict(net_pix2pix, net_disc, optimizer, optimizer_disc, 
     print('!!!! loading, load pretrained weight from', pretrained_path)
     print()
     return net_pix2pix, net_disc, optimizer, optimizer_disc
+
 
 def save_ckpt(net_pix2pix, net_disc, optimizer, optimizer_disc, outf, train_full_unet=False, freeze_vae=False):
     sd = {}
@@ -87,13 +81,14 @@ def save_ckpt(net_pix2pix, net_disc, optimizer, optimizer_disc, outf, train_full
 
 CACHE_T = 2
 
+
 def my_vae_encoder_fwd(self, x, feat_cache=None, feat_idx=[0]):
     if feat_cache is not None:
         idx = feat_idx[0]
         cache_x = x[:, :, -CACHE_T:, :, :].clone()
         if cache_x.shape[2] < 2 and feat_cache[idx] is not None:
             # cache last frame of last two chunk
-            cache_x = torch.cat([feat_cache[idx][:, :, -1, :, :].unsqueeze(2).to("cuda"), cache_x], dim=2)
+            cache_x = torch.cat([feat_cache[idx][:, :, -1, :, :].unsqueeze(2).to(cache_x.device), cache_x], dim=2)
         x = self.conv1(x, feat_cache[idx])
         feat_cache[idx] = cache_x
         feat_idx[0] += 1
@@ -125,7 +120,7 @@ def my_vae_encoder_fwd(self, x, feat_cache=None, feat_idx=[0]):
             if cache_x.shape[2] < 2 and feat_cache[idx] is not None:
                 # cache last frame of last two chunk
                 cache_x = torch.cat(
-                    [feat_cache[idx][:, :, -1, :, :].unsqueeze(2).to("cuda"), cache_x], dim=2
+                    [feat_cache[idx][:, :, -1, :, :].unsqueeze(2).to(cache_x.device), cache_x], dim=2
                 )
             x = layer(x, feat_cache[idx])
             feat_cache[idx] = cache_x
@@ -144,7 +139,7 @@ def my_vae_decoder_fwd(self, x, feat_cache=None, feat_idx=[0]):
         cache_x = x[:, :, -CACHE_T:, :, :].clone()
         if cache_x.shape[2] < 2 and feat_cache[idx] is not None:
             # cache last frame of last two chunk
-            cache_x = torch.cat([feat_cache[idx][:, :, -1, :, :].unsqueeze(2).to("cuda"), cache_x], dim=2)
+            cache_x = torch.cat([feat_cache[idx][:, :, -1, :, :].unsqueeze(2).to(cache_x.device), cache_x], dim=2)
         x = self.conv1(x, feat_cache[idx])
         feat_cache[idx] = cache_x
         feat_idx[0] += 1
@@ -173,8 +168,7 @@ def my_vae_decoder_fwd(self, x, feat_cache=None, feat_idx=[0]):
         else:
             x = layer(x)
 
-            
-    enc_dec_mapping =  {0:3, 1:4, 2:5, 5:6, 6:7, 8:9, 10:10, 12:9, 14:10}
+    enc_dec_mapping = {0:0, 1:1, 2:2, 5:3, 6:4, 8:6, 10:7, 12:9, 14:10}
     
     for dec_idx, layer in enumerate(self.upsamples):
         
@@ -184,21 +178,9 @@ def my_vae_decoder_fwd(self, x, feat_cache=None, feat_idx=[0]):
             
             skip_input = skip_acts[::-1][enc_indx]
             skip_in = skip_convs[layer_index](skip_input)  # 1x1 conv
-            
-            if dec_idx in [12, 14]:
-                B, C, T, H, W = skip_in.shape
-                SCALE = 2
-                
-                skip_in = skip_in.view((B, C * T, H, W))
-                skip_in = F.interpolate(skip_in, 
-                                        scale_factor=(SCALE, SCALE),
-                                        mode='bilinear',
-                                        align_corners=False)
-                skip_in = skip_in.view((B, C, T, H * SCALE, W * SCALE))
-
-
             x = x + skip_in  # add skip
-
+        
+        
         if feat_cache is not None:
             x = layer(x, feat_cache, feat_idx)
         else:
@@ -213,7 +195,7 @@ def my_vae_decoder_fwd(self, x, feat_cache=None, feat_idx=[0]):
             if cache_x.shape[2] < 2 and feat_cache[idx] is not None:
                 # cache last frame of last two chunk
                 cache_x = torch.cat(
-                    [feat_cache[idx][:, :, -1, :, :].unsqueeze(2).to("cuda"), cache_x], dim=2
+                    [feat_cache[idx][:, :, -1, :, :].unsqueeze(2).to(cache_x.device), cache_x], dim=2
                 )
             x = layer(x, feat_cache[idx])
             feat_cache[idx] = cache_x
@@ -223,15 +205,26 @@ def my_vae_decoder_fwd(self, x, feat_cache=None, feat_idx=[0]):
     return x
 
 
+import time
+
 
 class Pix2Pix_Turbo(torch.nn.Module):
     
-    def __init__(self, pretrained_path = None, freeze_vae_encoder=False, 
+    def __init__(self, experiment_name = None, s3_checkpoint_dir = None, pretrained_path = None,
+                 ckpt_folder="checkpoints", lora_rank_unet=8, lora_rank_vae=4, hf_path = None,
+                 unet_in_channels=4, freeze_vae_encoder=False, 
                  freeze_vae=False, train_full_unet=True, timestep=999, 
-                 use_sched = False, vae_skip_connection = False):
+                 use_sched = False, vae_skip_connection = False, batch_size = 1):
         super().__init__()
-                
-        self.timesteps = torch.tensor([timestep]).to("cuda")
+        
+        self.experiment_name = experiment_name
+        self.s3_checkpoint_dir = s3_checkpoint_dir
+        self.batch_size = batch_size
+
+        
+        self.timesteps = torch.tensor([timestep], device="cuda")#.half()#.long()
+        self.timesteps = torch.cat([self.timesteps] * batch_size, 0)
+        
         self.timesteps_int =  timestep
         
         self.train_full_unet = train_full_unet
@@ -249,7 +242,7 @@ class Pix2Pix_Turbo(torch.nn.Module):
 
         if pretrained_path is not None:
             print('loading from', pretrained_path)
-            sd = torch.load(pretrained_path, map_location="cuda", weights_only=False)
+            sd = torch.load(pretrained_path, map_location="cpu")
 
             self.unet.load_state_dict(sd["state_dict_unet"], strict=False)
             self.vae.load_state_dict(sd["state_dict_vae"], strict=False)
@@ -261,11 +254,12 @@ class Pix2Pix_Turbo(torch.nn.Module):
         print(f"Number of trainable parameters in VAE: {sum(p.numel() for p in self.vae.parameters() if p.requires_grad) / 1e6:.2f}M")
         print("="*50)
 
-    def sample_batch_image(self, batch_size: int = 1):
+    def sample_batch_image(self):
         #h, w = 384, 640
         #h, w = 768, 1360
-        h, w = 288, 512
+        h, w = 544, 960
         
+        batch_size = self.batch_size
         data_batch = {
             "dataset_name": "image_data",
             "images": torch.zeros(batch_size, 3, h, w).cuda(),
@@ -277,7 +271,7 @@ class Pix2Pix_Turbo(torch.nn.Module):
 
 
     def initialize_cosmos_model(self):
-
+        
         model = Text2ImagePipeline.from_config(
             config,
             dit_path=config.dit_path,
@@ -297,85 +291,27 @@ class Pix2Pix_Turbo(torch.nn.Module):
         self.condition = uncondition
 
         self.unet = model#.net # MiniTrainDIT
-        vae = model.tokenizer.model #model.tokenizer <projects.cosmos.diffusion.v2.tokenizers.wan2pt1.Wan2pt1VAEInterface object at 0x155401d12c20>
-        
-        self.img_mean = vae.img_mean
-        self.img_std = vae.img_std
-        self.video_mean = vae.video_mean
-        self.video_std = vae.video_std
-        self.scale = vae.scale
+        vae = model.tokenizer #model.tokenizer <projects.cosmos.diffusion.v2.tokenizers.wan2pt1.Wan2pt1VAEInterface object at 0x155401d12c20>
         
         
-        
-        ##### vae add skip
-        #vae =  vae.model
-        vae =  self.unet.tokenizer.model.model
-        
-        if self.vae_skip_connection:
-            print('------adding skip connection')
-            vae.decoder.skip_conv_0 = torch.nn.Conv3d(384, 384, kernel_size=1, stride=1, bias=False).cuda()  # <-- CHANGED
-            vae.decoder.skip_conv_1 = torch.nn.Conv3d(384, 384, kernel_size=1, stride=1, bias=False).cuda()  # <-- CHANGED
-            vae.decoder.skip_conv_2 = torch.nn.Conv3d(192, 384, kernel_size=1, stride=1, bias=False).cuda()  # <-- CHANGED
-            vae.decoder.skip_conv_3 = torch.nn.Conv3d(192, 384, kernel_size=1, stride=1, bias=False).cuda()  # <-- CHANGED
-            vae.decoder.skip_conv_4 = torch.nn.Conv3d(192, 384, kernel_size=1, stride=1, bias=False).cuda()  # <-- CHANGED
-            vae.decoder.skip_conv_5 = torch.nn.Conv3d(96, 192, kernel_size=1, stride=1, bias=False).cuda()  # <-- CHANGED
-            vae.decoder.skip_conv_6 = torch.nn.Conv3d(96, 192, kernel_size=1, stride=1, bias=False).cuda()  # <-- CHANGED
-            vae.decoder.skip_conv_7 = torch.nn.Conv3d(96, 96, kernel_size=1, stride=1, bias=False).cuda()  # <-- CHANGED
-            vae.decoder.skip_conv_8 = torch.nn.Conv3d(96, 96, kernel_size=1, stride=1, bias=False).cuda()  # <-- CHANGED
-
-            torch.nn.init.constant_(vae.decoder.skip_conv_0.weight, 1e-5)
-            torch.nn.init.constant_(vae.decoder.skip_conv_1.weight, 1e-5)
-            torch.nn.init.constant_(vae.decoder.skip_conv_2.weight, 1e-5)
-            torch.nn.init.constant_(vae.decoder.skip_conv_3.weight, 1e-5)
-            torch.nn.init.constant_(vae.decoder.skip_conv_4.weight, 1e-5)
-            torch.nn.init.constant_(vae.decoder.skip_conv_5.weight, 1e-5)
-            torch.nn.init.constant_(vae.decoder.skip_conv_6.weight, 1e-5)
-            torch.nn.init.constant_(vae.decoder.skip_conv_7.weight, 1e-5)
-            torch.nn.init.constant_(vae.decoder.skip_conv_8.weight, 1e-5)
-
-            vae.encoder.forward = my_vae_encoder_fwd.__get__(vae.encoder, vae.encoder.__class__)  # <-- CHANGED
-            vae.decoder.forward = my_vae_decoder_fwd.__get__(vae.decoder, vae.decoder.__class__)  # <-- CHANGED 
-
+        self.sigma_data = model.sigma_data  
         self.vae = vae
               
-        print(' new self.vae', self.vae)
-        print('-------------------------------------')
-        
-        
 
-
-        print('-------------------------------------')
-        print('SUCCESS in Initialize COSMOS MODEL')
+        print('=' * 50)
+        print('SUCCESS in initializing Cosmos Model')
         print(f"Number of parameters in UNet: {sum(p.numel() for p in self.unet.parameters() ) / 1e6:.2f}M")
         print(f"Number of parameters in VAE: {sum(p.numel() for p in self.vae.parameters()) / 1e6:.2f}M")
-        print('-------------------------------------')
+        print('=' * 50)
 
         self.unet.to("cuda")
         self.vae.to("cuda")
         
-        
-        
     def vae_encode(self, state: torch.Tensor) -> torch.Tensor:
-        latents = self.vae.encode(state, self.scale)
-        num_frames = latents.shape[2]
-        if num_frames == 1:
-            return (latents - self.img_mean.type_as(latents)) / self.img_std.type_as(latents)
-        else:
-            return (latents - self.video_mean[:, :, :num_frames].type_as(latents)) / self.video_std[
-                :, :, :num_frames
-            ].type_as(latents)
+        return self.vae.encode(state) * self.sigma_data        
 
     def vae_decode(self, latent: torch.Tensor) -> torch.Tensor:
-        num_frames = latent.shape[2]
-        if num_frames == 1:
-            return self.vae.decode(
-                (latent * self.img_std.type_as(latent)) + self.img_mean.type_as(latent), self.scale
-            )
-        else:
-            return self.vae.decode(
-                (latent * self.video_std[:, :, :num_frames].type_as(latent))
-                + self.video_mean[:, :, :num_frames].type_as(latent), self.scale
-            )
+        return self.vae.decode(latent / self.sigma_data)
         
     def set_eval(self):
         self.unet.eval()
@@ -410,53 +346,29 @@ class Pix2Pix_Turbo(torch.nn.Module):
             self.vae.encoder.eval()
             self.vae.encoder.requires_grad_(False)
 
+        
     def forward(self, x, timesteps=None):
 
         assert (timesteps is None) != (self.timesteps is None), "Either timesteps or self.timesteps should be provided"
         assert len(x.shape) == 4 
-              
-        unet_input = x[:, :, None, :, :]
         
-        SCALE = 2
-        B, C, T, H, W = unet_input.shape
-        
-        unet_input = unet_input.view((B, C * T, H, W))
-        
-        unet_input = F.interpolate(unet_input, 
-                                   scale_factor=(1/SCALE, 1/SCALE),
-                                   mode='bilinear',
-                                   align_corners=False)
-        
-        unet_input = unet_input.view((B, C, T, H // SCALE, W // SCALE))
+        x = x[:, :, None, :, :]
 
-
-        unet_input = self.vae_encode(unet_input)
+        unet_input = self.vae_encode(x)
         
-        
-        
-        B, C, T, H, W = unet_input.shape
-        unet_input = unet_input.view((B, C * T, H, W))
-        unet_input = F.interpolate(unet_input, 
-                                   scale_factor=(SCALE, SCALE),
-                                   mode='bilinear',
-                                   align_corners=False)
-        unet_input = unet_input.view((B, C, T, H * SCALE, W * SCALE))
-        
-        
-        
-        # ----- denoising
         sigma_B_T = self.timesteps.to(dtype=unet_input.dtype) / 1000
         
         model_pred = self.unet.denoise(xt_B_C_T_H_W = unet_input, 
                                sigma = sigma_B_T,
                                condition = self.condition ).x0
-        
+       
         z_denoised = model_pred
         
         if self.vae_skip_connection:
             self.vae.decoder.incoming_skip_acts = self.vae.encoder.current_down_blocks
-
-        output_image = self.vae_decode(z_denoised)        
+            
+        
+        output_image = self.vae_decode(z_denoised)
         
         output_image = output_image[:, :, 0]
 

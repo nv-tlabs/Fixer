@@ -9,3 +9,5 @@ __pycache__/
 */__pycache__/
 models/*
 output/*
+evaluation/*
+test_dataset/*

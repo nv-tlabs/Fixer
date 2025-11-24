@@ -75,6 +75,7 @@ def parse_args_paired_training(input_args=None):
     parser.add_argument("--freeze_vae_encoder", action="store_true")
     parser.add_argument("--freeze_vae", action="store_true")
     parser.add_argument("--add_noise", action="store_true")
+    parser.add_argument("--pretrained_path", type=str, default=None,)
     parser.add_argument("--train_full_unet", action="store_true")
     parser.add_argument("--unet_in_channels", default=4, type=int)
     parser.add_argument("--timestep", default=999, type=int)

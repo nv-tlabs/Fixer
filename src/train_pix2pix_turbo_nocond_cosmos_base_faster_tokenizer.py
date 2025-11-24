@@ -38,7 +38,7 @@ from diffusers.optimization import get_scheduler
 
 import wandb
 
-from pix2pix_turbo_nocond_cosmos_base_2x_smallimg_skip import Pix2Pix_Turbo, load_ckpt_from_state_dict, save_ckpt
+from pix2pix_turbo_nocond_cosmos_base_faster_tokenizer import Pix2Pix_Turbo, load_ckpt_from_state_dict, save_ckpt
 from utils.training_utils import parse_args_paired_training, PairedDatasetV2
 from utils.style_loss import style_loss
 
@@ -72,6 +72,7 @@ def main(args):
         timestep=args.timestep,
         use_sched=args.use_sched,
         vae_skip_connection=args.vae_skip_connection,
+        pretrained_path=args.pretrained_path
     )
     net_pix2pix.set_train()
 
