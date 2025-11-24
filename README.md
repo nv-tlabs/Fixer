@@ -15,7 +15,6 @@ CVPR 2025 (Oral)
 ## Setup
 
 - **Environment**: 
-  - We use `nvcr.io/nvidia/pytorch:24.10-py3` as the environment for inference with the pretrained JIT model
   - We use `nvcr.io/nvidia/cosmos/cosmos-predict2-container:1.2` as the base environment for training and inference with the pretrained model.
 
 - **Build Docker Image**:
@@ -29,53 +28,51 @@ CVPR 2025 (Oral)
   # Install Hugging Face CLI if not already installed
   pip install huggingface_hub[cli]
   
+  # Login to Hugging Face
+  hf auth login
+
   # Download all model weights to models/
-  huggingface-cli download nvidia/Fixer \
-    --local-dir models \
-    --local-dir-use-symlinks False
+  hf download nvidia/Fixer --local-dir models 
   ```
   
-  This downloads:
-  ```
-  models/base/cosmos_ablation_2B_0502_t2i_309_1024res_multidataset_v4_synthetic_ratio_1_3.pth
-  models/base/tokenizer.pth
-  models/pretrained/pretrained_fixer.pkl
-  models/pretrained/pretrained_fixer_jit.pt
-  ```
-
 ## Fixer Inference and Training
 
 ### Model Inference
-> First image processing includes one-time initialization overhead: Model weight loading from disk to GPU, CUDA kernel compilation. Expect the first image inference to take ~20-30s
-#### 1. Inference with pretrained JIT model
 
-```bash
-# Run inference with the PyTorch container
-docker run --gpus=all \
-  -v $(pwd):/work \
-  nvcr.io/nvidia/pytorch:24.10-py3 \
-  python /work/src/inference_pretrained_model_jit.py \
-  --model /work/models/pretrained/pretrained_fixer_jit.pt \
-  --input /work/examples \
-  --output /work/output \
-  --resolution 1024
-```
-#### 2. Inference with pretrained model 
+#### 1. Inference with pretrained model 
 ```bash
 # Run the Cosmos Container:
-docker run --gpus=all -it \
+docker run --gpus=all -it --ipc=host \
   -v $(pwd):/work \
   fixer-cosmos-env
 
 # Inside the container, run inference:
-python src/inference_pretrained_model.py \
+python /work/src/inference_pretrained_model.py \
   --model /work/models/pretrained/pretrained_fixer.pkl \
   --input /work/examples \
   --output /work/output \
-  --vae_skip_connection --timestep 250 --resolution 1024
+  --timestep 250
 ```
+#### 2. Evaluate a test dataset
+The steps to generate a test dataset and run evaulation can be found in [test dataset preparation tutorial](./doc/test_dataset_preparation_tutorial.md)
+
 
 ### Training
+
+##### Important: Apply Tokenizer Patch
+Before training, you must apply a patch to the cosmos tokenizer inside the container.
+
+1. Run the container:
+   ```bash
+   docker run --gpus=all -it --ipc=host \
+     -v $(pwd):/work \
+     fixer-cosmos-env
+   ```
+
+2. Inside the container, apply the patch:
+   ```bash
+   patch /usr/local/lib/python3.12/dist-packages/cosmos_predict2/tokenizers/tokenizer.py tokenizer.patch
+   ```
 
 #### 1. Data Preparation
 
@@ -100,8 +97,12 @@ Prepare your dataset in the following JSON format:
 }
 ```
 
+And the steps to generate training images pairs using NuRec could be found in [dataset preparation tutorial](./doc/dataset_preparation_tutorial.md)
 
 #### 2. Multiple GPUs Training Command
+
+##### Run Training Command
+
 
 ```bash
 export NUM_NODES=1
@@ -110,7 +111,7 @@ export OUTPUT_DIR="/path/to/checkpointing directory"
 export DATASET_FOLDER="/data/data.json" # Set to your data path
 export WANDB_MODE=offline
 
-accelerate launch --mixed_precision=bf16 --main_process_port 29501 --multi_gpu --num_machines $NUM_NODES --num_processes $NUM_GPUS src/train_pix2pix_turbo_nocond_cosmos_base_2x_smallimg_skip_datav2.py \
+accelerate launch --mixed_precision=bf16 --main_process_port 29501 --multi_gpu --num_machines $NUM_NODES --num_processes $NUM_GPUS src/train_pix2pix_turbo_nocond_cosmos_base_faster_tokenizer.py \
     --output_dir=${OUTPUT_DIR} \
     --dataset_folder=${DATASET_FOLDER} \
     --max_train_steps 10000 \
@@ -119,12 +120,15 @@ accelerate launch --mixed_precision=bf16 --main_process_port 29501 --multi_gpu -
     --checkpointing_steps=2000 --eval_freq 1000 --viz_freq 1000 \
     --train_image_prep "resize_576x1024" --test_image_prep "resize_576x1024" \
     --lambda_clipsim 0.0 --lambda_lpips 0.3 --lambda_gan 0.0 --lambda_l2 1.0 --lambda_gram 0.0 \
-    --use_sched --vae_skip_connection --report_to "wandb" --tracker_project_name "cosmos_fixer" --tracker_run_name "train" --train_full_unet --timestep 250 --track_val_fid --num_samples_eval 20
+    --use_sched --report_to "wandb" --tracker_project_name "cosmos_fixer" --tracker_run_name "train" --train_full_unet --timestep 250 --track_val_fid --num_samples_eval 20
 ```
-
-**Resume training:** use ```--resume ${OUTPUT_DIR}/checkpoints``` if you want to resume the model training
+**Resume training:** add ```--resume ${OUTPUT_DIR}/checkpoints``` if you want to resume the model training
 
 **Best practice:** We set the hyperparameters from our best practice explicitly in the command above. Specifically, we used a learning rate of ```2e-5```, timesteps of ```250```, on resolution of ```576×1024```, and a perceptual loss weight of ```0.3```, etc. We encourage users to start training with these defaults parameters first and adjust them to their dataset as needed.
+
+### Finetuning from a pretrained Fixer
+
+Include the flag ```--pretrained_path /path/to/pretrained_fixer.pkl``` to initialize training from the pretrained Fixer checkpoint; when omitted, the model will be finetuned directly from the raw Cosmos 0.6B image model.
 
 ## Citation
 

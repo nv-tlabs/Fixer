@@ -23,7 +23,8 @@ COPY requirements.txt .
 # Install dependencies
 # See https://github.com/nvidia-cosmos/cosmos-predict2 to install from source
 RUN pip install --no-deps "cosmos-predict2==1.0.9" && \
-    pip install -r requirements.txt
+    pip install -r requirements.txt && \
+    pip install torchmetrics[image]
 
 # Set the entrypoint
 ENTRYPOINT ["/bin/bash"]
