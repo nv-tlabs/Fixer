@@ -132,6 +132,14 @@ accelerate launch --mixed_precision=bf16 --main_process_port 29501 --multi_gpu -
 
 Include the flag ```--pretrained_path /path/to/pretrained_fixer.pkl``` to initialize training from the pretrained Fixer checkpoint; when omitted, the model will be finetuned directly from the raw Cosmos 0.6B image model.
 
+## Support
+
+**Usage questions and discussion:** please post on the [NVIDIA Developer Forum (Omniverse / NuRec)](https://forums.developer.nvidia.com/c/omniverse/platform/nurec/752).
+
+**Code-level bugs, documentation issues, and feature requests:** file a [GitHub issue](../../issues/new/choose) using the appropriate template. The relevant NVIDIA responder is assigned automatically.
+
+**Security vulnerabilities:** use [NVIDIA's Vulnerability Disclosure Program](https://app.intigriti.com/programs/nvidia/nvidiavdp/detail). Do not file security issues publicly in this repository.
+
 ## Citation
 
 ```bibtex
