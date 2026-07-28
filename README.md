@@ -3,7 +3,7 @@
   <img src="assets/demo.gif" alt="Fixer Demo">
 </p>
 
-Fixer is a single-step image diffusion model trained to enhance and remove artifacts in rendered novel views caused by underconstrained regions of three-dimensional (3D) representation. 
+NVIDIA Fixer is a Cosmos-based single-step diffusion model that enhances rendered views by removing reconstruction artifacts. Its corrected views can augment reconstruction training data to help improve reconstruction quality. It builds on the Difix3D+ approach and supports autonomous vehicle and robotics simulation.
 
 Fixer is based on Difix3d+. See **[Paper](https://arxiv.org/abs/2503.01774) | [Code](https://github.com/nv-tlabs/Difix3D/tree/main) | [Project Page](https://research.nvidia.com/labs/toronto-ai/difix3d/)**
 
